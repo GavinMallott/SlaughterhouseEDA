@@ -59,6 +59,7 @@ pub const EndCard = struct {
 };
 
 
+pub const Signal_t = union(enum(u8)) {
     PULSE,                  //PULSE(V1 V2 TD TR TF PW PER)   ###   VIN 3 0 PULSE(-1 1 2NS 2NS 2NS 50NS 100NS)
     SIN,                    //SIN(VO VA FREQ TD THETA)   ###   VIN 3 0 SIN(0 1 100MEG 1NS 1E10)
     EXP,                    //EXP(V1 V2 TD1 TAU1 TD2 TAU2)   ###   VIN 3 0 EXP(-4 -1 2NS 30NS 60NS 40NS)
@@ -167,14 +168,3 @@ pub const Method_t = union(enum) {
     GEAR,
     TRAPEZOIDAL,
 };
-
-test {
-    const title_card = Card{ 
-        .card_t = Card_t{ 
-            .TITLE = TitleCard{
-                .title = "First Circuit",
-            }
-        }
-    };
-    const r1_card = Card{ .card_t = .ELEMENT };
-}
