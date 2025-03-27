@@ -25,9 +25,6 @@ test "simple test" {
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
-test "use other module" {
-    try std.testing.expectEqual(@as(i32, 150), lib.add(100, 50));
-}
 
 test "fuzz example" {
     const global = struct {
@@ -40,6 +37,3 @@ test "fuzz example" {
 }
 
 const std = @import("std");
-
-/// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
-const lib = @import("Slaughterhouse_lib");

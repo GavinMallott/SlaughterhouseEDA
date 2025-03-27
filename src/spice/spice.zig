@@ -46,27 +46,6 @@ pub const Card = struct {
 
 };
 
-pub const ITitle = struct {
-    title: []const u8 = "Default Title",
-    
-    const Title = @This();
-
-    pub fn parseTitle(title_string: []const u8) Title {
-        return Title{
-            .title = title_string,
-        };
-    }
-    
-    pub fn TitleCard(self: *Title) Card {
-        return Card{
-            .card_t = .TITLE,
-            .card_id = "",
-            .arglist = [1][]const u8 {self.title},
-        };
-    }
-
-};
-
 pub const CommentCard = struct {
     id: []const u8 = "*",
     comment: []const u8 = "",
