@@ -1,0 +1,9 @@
+Hello World
+*This is a comment
+.MODEL DMOD D
+D1 1 2 DMOD
+VCC 1 0 12
+RDiode 2 0 1k
+.OPTIONS LIST NODE LIMPTS=6401
+.DC VCC 0 100 1
+.END

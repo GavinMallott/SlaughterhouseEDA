@@ -1,4 +1,12 @@
 const std = @import("std");
+const printf = std.debug.print;
+fn prints(s: []const u8) void {
+    printf("{s}\n", .{s});
+}
+
+pub const DEBUG = true;
+
+const file = @embedFile("sample.net");
 
 //Scales
 const k: f64 = 1e3;
@@ -15,51 +23,62 @@ pub fn c_from_k (kelvin: f64) f64 {
     return kelvin - 273;
 }
 
-pub const Net = struct {
-    items: std.AutoHashMap(Component, u64),
-    name: []const u8,
-
-};
-
-pub const Component = struct {
-    comp_t: Element_t,
-
-
-
-};
-
-pub const Card_t = union(enum) {
+pub const Card_t = enum(u8){
     TITLE,
     COMMENT,
     END,
-    SUBCKT,              //.SUBCKT subnam N1 <N2,N3,N4 ...>   ###   .SUBCKT OPAMP 1 2 3 4
-    ELEMENT,
-    MODEL,               //.MODEL MNAME TYPE(PNAME1=PVAL1 PNAME2=PVAL2 ... )   ###   .MODEL MOD1 NPN BF=50 IS=1E-13 VBF=50
-    CONTROL,
+    SUBCKT_DEF,              //.SUBCKT subnam N1 <N2,N3,N4 ...>   ###   .SUBCKT OPAMP 1 2 3 4
+    
+    MODEL,                   //.MODEL MNAME TYPE(PNAME1=PVAL1 PNAME2=PVAL2 ... )   ###   .MODEL MOD1 NPN BF=50 IS=1E-13 VBF=50
+    
+    // ELEMENTS:
+    R,   //RESISTOR            RXXXXXXX N1 N2 VALUE <TC=TC1<,TC2>>   ###   RC1 12 17 1K TC=0.001,0.015
+    C,   //CAPACITOR           CXXXXXXX N+ N- VALUE <IC=INCOND>   ###   COSC 17 23 10U IC=3V
+    L,   //INDUCTOR            LXXXXXXX N+ N- VALUE <IC=INCOND>   ###   LSHUNT 23 51 10U IC=15.7MA
+    K,   //COUPLED_INDUCTOR    KXXXXXXX LYYYYYYY LZZZZZZZ VALUE   ###   KXFRMR L1 L2 0.87
+    T,   //TRANSMISSION_LINE   TXXXXXXX N1 N2 N3 N4 Z0=VALUE <TD=VALUE> <F=FREQ <NL=NRMLEN>>+<IC=V1,I1,V2,I2>   ###   T1 1 0 2 0 Z0=50 TD=10NS
+
+    //Independant Sources (IS)
+    V,   //VOLTAGE             VXXXXXXX N+ N- <<DC> DC/TRAN VALUE> <AC <ACMAG <ACPHASE>>>   ###   VIN 13 2 0.001 AC 1 SIN(0 1 1MEG)
+    I,   //CURRENT             IYYYYYYY N+ N- <<DC> DC/TRAN VALUE> <AC <ACMAG <ACPHASE>>>   ###   ISRC 23 21 AC 0.333 45.0 SFFM(0 1 10K 5 1K)
+
+    //Dependant Sources (DS)
+    G,   //VCCS                GXXXXXXX N+ N- NC+ NC- VALUE   ###   G1 2 0 5 0 0.1MMHO
+    E,   //VCVS                EXXXXXXX N+ N- NC+ NC- VALUE   ###   E1 2 3 14 1 2.0
+    F,   //CCCS                FXXXXXXX N+ N- VNAM VALUE   ###   F1 13 5 VSENS 5
+    H,   //CCVS                HXXXXXXX N+ N- VNAM VALUE   ###   HX 5 17 VZ 0.5K
+
+    //Semiconductor Devices (SD) Requires .MODEL Card in Deck
+    D,   //DIODE               DXXXXXXX N+ N- MNAME <AREA> <OFF> <IC=VD>   ###   DCLMP 3 7 DMOD 3.0 IC=0.2
+    Q,   //BJT                 QXXXXXXX NC NB NE <NS> MNAME <AREA> <OFF> <IC=VBE,VCE>   ###   Q23 10 24 13 QMOD IC=0.6,5.0
+    J,   //JFET                JXXXXXXX ND NG NS MNAME <AREA> <OFF> <IC=VDS,VGS>   ###   J1 7 2 3 JM1 OFF
+    M,   //MOSFET              MXXXXXXX ND NG NS NB MNAME <L=VAL> <W=VAL> <AD=VAL> <AS=VAL> <PD=VAL> <PS=VAL> <NRD=VAL> <NRS=VAL> <OFF> <IC=VDS,VGS,VBS>
+
+    //Subcircuit Call (SC) Requires .SUBCKT Definition in Deck
+    X,   //SUBCKT_CALL         XXXXXXXX N1 <N2,N3,N4...> SUBNAM   ###   X1 2 4 17 3 1 MULTI
+
+    // CONTROLS:
+    TEMP,                      //.TEMP T1 <T2,T3,T4 ...>   ###   .TEMP -55.0 25.0 125.0
+    WIDTH,                     //.WIDTH IN=COLNUM OUT=COLNUM   ###   .WIDTH IN=72 OUT=133
+    OPTIONS,                   //.OPTIONS OPT1 OPT2 ... (or OPT=OPTVAL ...)   ###   .OPTIONS ACCT LIST NODE
+    OP,                        //.OP   ###   Force Determine DC Operating Point (Inductors shorted, Capacitors opened) Will be called automattically if no other analysis is called
+    DC,                        //.DC SRCNAM VSTART VSTOP VINCR [SRC2 START2 STOP2 INCR2]   ###   .DC VCE 0 10 .25 IB 0 10U 1U   (DC Sweep requires at least one IS with DC Value)
+    NODESET,                   //.NODESET V(NODNUM)=VAL V(NODNUM)=VAL ...   ###   .NODESET V(12)=4.5 V(4)=2.23   (Sets Voltage or Current at specified node)
+    IC,                        //.IC V(NODNUM)=VAL V(NODNUM)=VAL ...   ###   .IC V(11)=5 V(4)=-5 V(2)=2.2   (Transient Initial Conditions)
+    TF,                        //.TF OUTVAR INSRC   ###   .TF V(5,3) VIN   (DC Small-Signal Transfer Function)
+    SENS,                      //.SENS OV1 <OV2 ... >   ###   .SENS V(9) V(4,3) V(17) I(VCC)   (DC Small=Signal Sensitivity)
+    AC,                        //.AC DEC ND FSTART FSTOP or .AC OCT NO FSTART FSTOP or .AC LIN NP FSTART FSTOP   (AC Analysis requires at least on IS with AC Value)
+    DISTO,                     //.DISTO RLOAD <INTER <SKW2 <REFPWR <SPW2>>>>   ###   .DISTO RL 2 0.95 1.0E-3 0.75   (Compute Distortion)
+    NOISE,                     //.NOISE OUTV INSRC NUMS   ###   .NOISE V(5) VIN 10   (Noise Analysis used with AC Card)
+    TRAN,                      //.TRAN TSTEP TSTOP <TSTART <TMAX>> <UIC>   ###   .TRAN 1NS 1000NS 500NS   (Perform Transient Analysis)
+    FOUR,                      //.FOUR FREQ OV1 <OV2 OV3 ...>   ###   .FOUR 100K  V(5)   (Perform Fourier Analysis w/ fundamental frequency and specified output variables)
+    PRINT,                     //.PRINT PRTYPE OV1 <OV2 ... OV8>   ###   .PRINT DC V(2) I(VSRC) V(23,17)
+    PLOT,                      //.PLOT PLTYPE OV1 <(PLO1,PHI1)> <OV2 <(PLO2,PHI2)> ... OV8>   ###   .PLOT AC VM(5) VM(31,24) VDB(5) VP(5)
+
 
 };
 
-pub const Card = struct {
-    card_t: Card_t,
-    card_id: []const u8 = "",
-    arglist: [][]const u8 = [_][]const u8 {""},
-
-};
-
-pub const CommentCard = struct {
-    id: []const u8 = "*",
-    comment: []const u8 = "",
-
-};
-
-pub const EndCard = struct {
-    id: []const u8 = ".END",
-    subckt_end: bool = false,
-
-};
-
-
-pub const Signal_t = union(enum(u8)) {
+pub const Signal_t = enum(u8){
     PULSE,                  //PULSE(V1 V2 TD TR TF PW PER)   ###   VIN 3 0 PULSE(-1 1 2NS 2NS 2NS 50NS 100NS)
     SIN,                    //SIN(VO VA FREQ TD THETA)   ###   VIN 3 0 SIN(0 1 100MEG 1NS 1E10)
     EXP,                    //EXP(V1 V2 TD1 TAU1 TD2 TAU2)   ###   VIN 3 0 EXP(-4 -1 2NS 30NS 60NS 40NS)
@@ -68,7 +87,7 @@ pub const Signal_t = union(enum(u8)) {
 
 };
 
-pub const Model_t = union(enum(u8)) {    
+pub const Model_t = enum(u8){    
     D,
     NPN,
     PNP,
@@ -79,56 +98,7 @@ pub const Model_t = union(enum(u8)) {
 
 };
 
-pub const Element_t = union(enum) {
-    RESISTOR,               //RXXXXXXX N1 N2 VALUE <TC=TC1<,TC2>>   ###   RC1 12 17 1K TC=0.001,0.015
-    CAPACITOR,              //CXXXXXXX N+ N- VALUE <IC=INCOND>   ###   COSC 17 23 10U IC=3V
-    INDUCTOR,               //LXXXXXXX N+ N- VALUE <IC=INCOND>   ###   LSHUNT 23 51 10U IC=15.7MA
-    COUPLED_INDUCTOR,       //KXXXXXXX LYYYYYYY LZZZZZZZ VALUE   ###   KXFRMR L1 L2 0.87
-    TRANSMISSION_LINE,      //TXXXXXXX N1 N2 N3 N4 Z0=VALUE <TD=VALUE> <F=FREQ <NL=NRMLEN>>+<IC=V1,I1,V2,I2>   ###   T1 1 0 2 0 Z0=50 TD=10NS
-
-    //Independant Sources (IS)
-    VOLTAGE_SOURCE,         //VXXXXXXX N+ N- <<DC> DC/TRAN VALUE> <AC <ACMAG <ACPHASE>>>   ###   VIN 13 2 0.001 AC 1 SIN(0 1 1MEG)
-    CURRENT_SOURCE,         //IYYYYYYY N+ N- <<DC> DC/TRAN VALUE> <AC <ACMAG <ACPHASE>>>   ###   ISRC 23 21 AC 0.333 45.0 SFFM(0 1 10K 5 1K)
-
-    //Linear Dependant Sources (LDS)
-    LVCCS,                  //GXXXXXXX N+ N- NC+ NC- VALUE   ###   G1 2 0 5 0 0.1MMHO
-    LVCVS,                  //EXXXXXXX N+ N- NC+ NC- VALUE   ###   E1 2 3 14 1 2.0
-    LCCCS,                  //FXXXXXXX N+ N- VNAM VALUE   ###   F1 13 5 VSENS 5
-    LCCVS,                  //HXXXXXXX N+ N- VNAM VALUE   ###   HX 5 17 VZ 0.5K
-
-    //Semiconductor Devices (SD) Requires .MODEL Card in Deck
-    DIODE,                  //DXXXXXXX N+ N- MNAME <AREA> <OFF> <IC=VD>   ###   DCLMP 3 7 DMOD 3.0 IC=0.2
-    BJT,                    //QXXXXXXX NC NB NE <NS> MNAME <AREA> <OFF> <IC=VBE,VCE>   ###   Q23 10 24 13 QMOD IC=0.6,5.0
-    JFET,                   //JXXXXXXX ND NG NS MNAME <AREA> <OFF> <IC=VDS,VGS>   ###   J1 7 2 3 JM1 OFF
-    MOSFET,                 //MXXXXXXX ND NG NS NB MNAME <L=VAL> <W=VAL> <AD=VAL> <AS=VAL> <PD=VAL> <PS=VAL> <NRD=VAL> <NRS=VAL> <OFF> <IC=VDS,VGS,VBS>
-
-    //Subcircuit Call (SC) Requires .SUBCKT Definition in Deck
-    SUBCKT,                 //XXXXXXXX N1 <N2,N3,N4...> SUBNAM   ###   X1 2 4 17 3 1 MULTI
-
-};
-
-pub const Control_t = union(enum(u8)) {
-    TEMP,                   //.TEMP T1 <T2,T3,T4 ...>   ###   .TEMP -55.0 25.0 125.0
-    WIDTH,                  //.WIDTH IN=COLNUM OUT=COLNUM   ###   .WIDTH IN=72 OUT=133
-    OPTIONS,                //.OPTIONS OPT1 OPT2 ... (or OPT=OPTVAL ...)   ###   .OPTIONS ACCT LIST NODE
-    OP,                     //.OP   ###   Force Determine DC Operating Point (Inductors shorted, Capacitors opened) Will be called automattically if no other analysis is called
-    DC,                     //.DC SRCNAM VSTART VSTOP VINCR [SRC2 START2 STOP2 INCR2]   ###   .DC VCE 0 10 .25 IB 0 10U 1U   (DC Sweep requires at least one IS with DC Value)
-    NODESET,                //.NODESET V(NODNUM)=VAL V(NODNUM)=VAL ...   ###   .NODESET V(12)=4.5 V(4)=2.23   (Sets Voltage or Current at specified node)
-    IC,                     //.IC V(NODNUM)=VAL V(NODNUM)=VAL ...   ###   .IC V(11)=5 V(4)=-5 V(2)=2.2   (Transient Initial Conditions)
-    TF,                     //.TF OUTVAR INSRC   ###   .TF V(5,3) VIN   (DC Small-Signal Transfer Function)
-    SENS,                   //.SENS OV1 <OV2 ... >   ###   .SENS V(9) V(4,3) V(17) I(VCC)   (DC Small=Signal Sensitivity)
-    AC,                     //.AC DEC ND FSTART FSTOP or .AC OCT NO FSTART FSTOP or .AC LIN NP FSTART FSTOP   (AC Analysis requires at least on IS with AC Value)
-    DISTO,                  //.DISTO RLOAD <INTER <SKW2 <REFPWR <SPW2>>>>   ###   .DISTO RL 2 0.95 1.0E-3 0.75   (Compute Distortion)
-    NOISE,                  //.NOISE OUTV INSRC NUMS   ###   .NOISE V(5) VIN 10   (Noise Analysis used with AC Card)
-    TRAN,                   //.TRAN TSTEP TSTOP <TSTART <TMAX>> <UIC>   ###   .TRAN 1NS 1000NS 500NS   (Perform Transient Analysis)
-    FOUR,                   //.FOUR FREQ OV1 <OV2 OV3 ...>   ###   .FOUR 100K  V(5)   (Perform Fourier Analysis w/ fundamental frequency and specified output variables)
-    PRINT,                  //.PRINT PRTYPE OV1 <OV2 ... OV8>   ###   .PRINT DC V(2) I(VSRC) V(23,17)
-    PLOT,                   //.PLOT PLTYPE OV1 <(PLO1,PHI1)> <OV2 <(PLO2,PHI2)> ... OV8>   ###   .PLOT AC VM(5) VM(31,24) VDB(5) VP(5)
-
-};
-
-
-pub const Option_t = struct {
+pub const Options = struct {
     ACCT: bool = false,     // causes accounting and run time statistics to be printed
     LIST: bool = false,     // causes the summary listing of the input data to be printed
     NOMOD: bool = false,    // suppresses the printout of the model parameters
@@ -164,7 +134,208 @@ pub const Option_t = struct {
 
 };
 
-pub const Method_t = union(enum) {
+pub const Method_t = enum(u8) {
     GEAR,
     TRAPEZOIDAL,
 };
+
+pub const Component = struct {
+    comp_t: Component_t,
+    uuid: []const u8,
+    nodes: []const []const u8,
+    value: ?f64,
+    model: ?Model,
+    args: ?std.StringHashMap([]const u8),
+
+    pub const Component_t = enum(u8) {
+        RESISTOR,
+        CAPACITOR,
+        INDUCTOR,
+        COUPLED_INDUCTOR,
+        TRANSMISSION_LINE,
+
+        VOLTAGE_SOURCE,
+        CURRENT_SOURCE,
+
+        VCVS,
+        CCVS,
+        VCCS,
+        CCCS,
+
+        DIODE,
+        BJT,
+        JFET,
+        MOSFET,
+
+        SUBCKT,
+
+    };
+
+};
+
+pub const Control = struct {
+
+};
+
+pub const Model = struct {
+
+};
+
+pub const Spice = struct {
+    title: []const u8,
+    comments: std.ArrayList([]const u8),
+    opts: Options,
+
+    components: std.ArrayList(Component),
+    models: std.ArrayList(Model),
+    controls: std.ArrayList(Control),
+
+    ally: std.mem.Allocator,
+
+
+    pub const Self = @This();
+
+    pub fn init(ally: std.mem.Allocator, title: []const u8) !Self {
+        return .{
+            .title = title,
+            .coompoents = std.ArrayList(Component).init(ally),
+            .model = std.ArrayList(Model).init(ally),
+            .controls = std.ArrayList(Control).init(ally),
+            .comments = std.ArrayList([]const u8).init(ally),
+            .opts = Options{},
+            .ally = ally,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.comments.deinit();
+        self.components.deinit();
+        self.controls.deinit();
+    }
+
+
+    pub fn createModel(self: *Self, model_t: Model_t, args: []const u8) void {
+        _ = self;
+        _ = args;
+        _ = model_t;
+    }
+
+    pub fn addOptions(self: *Self, opt_line: []const u8) void {
+        var words = std.mem.splitSequence(u8, opt_line, " ");
+        while(words.next()) |word| {    
+            var val_opt = std.mem.splitSequence(u8, word, "=");
+            const kword = val_opt.next().?;
+            const value = val_opt.next();
+
+            if (std.mem.eql(u8, kword, "LIST") == true) {
+                self.opts.LIST = true;
+                if (DEBUG) printf("Set option {s} to true.\n", .{kword});
+            } else if (std.mem.eql(u8, kword, "NODE") == true) {
+                self.opts.NODE = true;
+                if (DEBUG) printf("Set option {s} to true.\n", .{kword});
+            } else if (std.mem.eql(u8, kword, "LIMPTS") == true) {
+                const int_val: u64 = std.fmt.parseInt(u64, value.?, 10) catch unreachable;
+                self.opts.LIMPTS = int_val;
+                if (DEBUG) printf("Set option {s} to {d}.\n", .{kword, int_val});
+            }
+
+        }
+    }
+
+    pub fn dispOptions(self: *Self) void {
+        prints("");
+        prints("        -- OPTIONS --");
+        printf("ACCT: {}\n", .{self.opts.ACCT});
+        printf("LIST: {}\n", .{self.opts.LIST}); 
+        printf("NOMOD: {}\n", .{self.opts.NOMOD});
+        printf("NOPAGE: {}\n", .{self.opts.NOPAGE});
+        printf("NODE: {}\n", .{self.opts.NODE});
+        printf("OPTS: {}\n", .{self.opts.OPTS}); 
+        printf("GMIN: {d}\n", .{self.opts.GMIN}); 
+        printf("RELTOL: {d}\n", .{self.opts.RELTOL});
+        printf("ABSTOL: {d}\n", .{self.opts.ABSTOL});
+        printf("VNTOL: {d}\n", .{self.opts.VNTOL});
+        printf("TRTOL: {d}\n", .{self.opts.TRTOL});
+        printf("CHGTOL: {d}\n", .{self.opts.CHGTOL});
+        printf("PIVTOL: {d}\n", .{self.opts.PIVTOL});
+        printf("PIVREL: {d}\n", .{self.opts.PIVREL});
+        printf("NUMDGT: {d}\n", .{self.opts.NUMDGT});
+        printf("TNOM: {d}\n", .{self.opts.TNOM});
+        printf("ITL1: {d}\n", .{self.opts.ITL1});
+        printf("ITL2: {d}\n", .{self.opts.ITL2});
+        printf("ITL3: {d}\n", .{self.opts.ITL3});
+        printf("ITL4: {d}\n", .{self.opts.ITL4});
+        printf("ITL5: {d}\n", .{self.opts.ITL5});
+        printf("CPTIME: {d}\n", .{self.opts.CPTIME});
+        printf("LIMTIM: {d}\n", .{self.opts.LIMTIM});
+        printf("LIMPTS: {d}\n", .{self.opts.LIMPTS});
+        printf("LVLCOD: {d}\n", .{self.opts.LVLCOD});
+        printf("LVLTIME: {d}\n", .{self.opts.LVLTIME});
+        const method_str = switch (self.opts.METHOD){
+            .TRAPEZOIDAL => "Trapezoidal",
+            .GEAR => "Gear",
+        };
+        printf("METHOD: {s}\n", .{method_str});
+        printf("MAXORD: {d}\n", .{self.opts.MAXORD});
+        printf("DEFL: {d}\n", .{self.opts.DEFL});
+        printf("DEFW: {d}\n", .{self.opts.DEFW}); 
+        printf("DEFAD: {d}\n", .{self.opts.DEFAD});
+        printf("DEFAS: {d}\n", .{self.opts.DEFAS});
+    }
+};
+
+pub fn getField(comptime ctx: type, instance: ctx, field_name: []const u8) ?anyopaque {
+    const fields = std.meta.fields(ctx);
+    inline for (fields) |field| {
+        if (std.mem.eql(u8, field.name, field_name)) {
+            return @field(instance, field.name);
+        }
+    }
+    return null;
+}
+
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const ally = gpa.allocator();
+    defer _ = gpa.deinit();
+
+    var SpiceEngine = try Spice.init(ally);
+    defer SpiceEngine.deinit();
+
+    var lines = std.mem.splitSequence(u8, file, "\r\n");
+    while(lines.next()) |line| {
+        var card: Card = undefined;
+        if (std.mem.eql(u8, ".", line[0..1]) == true) {
+            var words = std.mem.splitSequence(u8, line[1..], " ");
+            const cmd_str = words.next().?;
+            const cmd: Card_t = std.meta.stringToEnum(Card_t, cmd_str).?;
+            switch (cmd) {
+                .END => {
+                    prints("EOF");
+                },
+                .MODEL => {
+                    prints(line);
+                    //Spice.createModel(.D, line);
+                },
+                .OPTIONS => {
+                    SpiceEngine.addOptions(line[9..]);
+                    SpiceEngine.dispOptions();
+                    //SpiceEngine.dispOptions();
+                },
+                .DC => {
+
+                },
+                else => {
+                    prints("Not valid . command");
+                }
+            }
+
+        } else if (std.mem.eql(u8, "*", line[0..1]) == true) {
+            card = Card{ .card_t = .COMMENT, .args = line[0..]};
+        } else {
+            card = Card{ .card_t = .TITLE, .args = line};
+        }
+
+    }
+}
