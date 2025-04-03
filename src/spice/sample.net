@@ -1,9 +1,17 @@
 Hello World
 *This is a comment
+
 .MODEL DMOD D
+*Model for Diode D1
 D1 1 2 DMOD
+
 VCC 1 0 12
-RDiode 2 0 1k
+*VCC ordered from DigiKey
+
+RDiode 2 0 1k 25
+*R1 optional
+
+*Controls:
 .OPTIONS LIST NODE LIMPTS=6401
 .DC VCC 0 100 1
 .END

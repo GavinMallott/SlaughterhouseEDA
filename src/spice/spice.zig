@@ -142,10 +142,11 @@ pub const Method_t = enum(u8) {
 pub const Component = struct {
     comp_t: Component_t,
     uuid: []const u8,
-    nodes: []const []const u8,
+    designator: []const u8,
+    nodes: [][]const u8,
     value: ?f64,
     model: ?Model,
-    args: ?std.StringHashMap([]const u8),
+    args: std.StringArrayHashMapUnmanaged([]const u8),
 
     pub const Component_t = enum(u8) {
         RESISTOR,
@@ -181,6 +182,12 @@ pub const Model = struct {
 
 };
 
+pub const SpiceError = error{
+    InvalidComponentArgument,
+    OutOfMemory,
+    InvalidValue,
+};
+
 pub const Spice = struct {
     title: []const u8,
     comments: std.ArrayList([]const u8),
@@ -195,11 +202,11 @@ pub const Spice = struct {
 
     pub const Self = @This();
 
-    pub fn init(ally: std.mem.Allocator, title: []const u8) !Self {
+    pub fn init(ally: std.mem.Allocator) !Self {
         return .{
-            .title = title,
-            .coompoents = std.ArrayList(Component).init(ally),
-            .model = std.ArrayList(Model).init(ally),
+            .title = "",
+            .components = std.ArrayList(Component).init(ally),
+            .models = std.ArrayList(Model).init(ally),
             .controls = std.ArrayList(Control).init(ally),
             .comments = std.ArrayList([]const u8).init(ally),
             .opts = Options{},
@@ -211,6 +218,99 @@ pub const Spice = struct {
         self.comments.deinit();
         self.components.deinit();
         self.controls.deinit();
+    }
+
+    pub fn genId(self: *Self) []const u8 {
+        _ = self;
+        return "";
+    }
+
+    pub fn parseComponent(self: *Self, ct: Component.Component_t, instr: []const u8) SpiceError!Component {
+        var words = std.mem.splitSequence(u8, instr, " ");
+        var new_component: Component = undefined;
+        switch (ct) {
+            .RESISTOR => {
+                const designator = words.next();
+                const net1 = words.next();
+                const net2 = words.next();
+                const value = words.next();
+                if (designator == null) return SpiceError.InvalidComponentArgument;
+                if (net1 == null) return SpiceError.InvalidComponentArgument;
+                if (net2 == null) return SpiceError.InvalidComponentArgument;
+                if (value == null) return SpiceError.InvalidComponentArgument;
+
+                const fvalue = self.parseFloat(f64, value.?) catch unreachable;
+
+                const nodes = [_][]const u8 {net1.?, net2.?};
+                var args = std.StringHashMap([]const u8).init(self.ally);
+                while(words.next()) |arg| {
+                    args.put("TC", arg) catch |e| {
+                        return e;
+                    };
+                }
+
+                new_component = Component{
+                    .comp_t = ct,
+                    .uuid = self.genId(),
+                    .designator = designator.?,
+                    .model = null,
+                    .nodes = @constCast(nodes[0..]),
+                    .value = fvalue,
+                    .args = args,
+
+                };
+            },
+            .CAPACITOR => {},
+            else => {},
+        }
+        return new_component;
+    }
+
+    fn parseFloat(self: *Self, comptime ctx: type, s: []const u8) !ctx {
+        _ = self;
+        const len = s.len - 1;
+        const num = s[0..len];
+        const mod = s[len..];
+
+        var val = try std.fmt.parseFloat(ctx, num);
+
+        if(std.mem.eql(u8, "k", mod)) {
+            val = val * k;
+        }
+        if(std.mem.eql(u8, "M", mod)) {
+            val = val * M;
+        }
+        if(std.mem.eql(u8, "G", mod)) {
+            val = val * G;
+        }
+        if(std.mem.eql(u8, "T", mod)) {
+            val = val * T;
+        }
+        if(std.mem.eql(u8, "P", mod)) {
+            val = val * P;
+        }
+        if(std.mem.eql(u8, "m", mod)) {
+            val = val * m;
+        }
+        if(std.mem.eql(u8, "u", mod)) {
+            val = val * u;
+        }
+        if(std.mem.eql(u8, "n", mod)) {
+            val = val * n;
+        }
+        if(std.mem.eql(u8, "p", mod)) {
+            val = val * p;
+        }
+        if(std.mem.eql(u8, "f", mod)) {
+            val = val * f;
+        }
+
+        return val;
+
+    }
+
+    pub fn addComponent(self: *Self, c: Component) void {
+        self.components.append(c) catch unreachable;
     }
 
 
@@ -305,7 +405,11 @@ pub fn main() !void {
 
     var lines = std.mem.splitSequence(u8, file, "\r\n");
     while(lines.next()) |line| {
-        var card: Card = undefined;
+        // Check for empty line
+        const trimmed = std.mem.trim(u8, line, "\t\r\n");
+        if (trimmed.len == 0) continue;
+        
+        // Check for . Command
         if (std.mem.eql(u8, ".", line[0..1]) == true) {
             var words = std.mem.splitSequence(u8, line[1..], " ");
             const cmd_str = words.next().?;
@@ -313,6 +417,7 @@ pub fn main() !void {
             switch (cmd) {
                 .END => {
                     prints("EOF");
+                    prints("");
                 },
                 .MODEL => {
                     prints(line);
@@ -320,7 +425,6 @@ pub fn main() !void {
                 },
                 .OPTIONS => {
                     SpiceEngine.addOptions(line[9..]);
-                    SpiceEngine.dispOptions();
                     //SpiceEngine.dispOptions();
                 },
                 .DC => {
@@ -332,10 +436,67 @@ pub fn main() !void {
             }
 
         } else if (std.mem.eql(u8, "*", line[0..1]) == true) {
-            card = Card{ .card_t = .COMMENT, .args = line[0..]};
+            try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "R", line[0..1]) == true) {
+            const new_r = try SpiceEngine.parseComponent(.RESISTOR, line);
+            SpiceEngine.addComponent(new_r);
+
+        } else if (std.mem.eql(u8, "C", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "L", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "K", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "T", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "V", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "I", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "G", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "E", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "F", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "H", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "D", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "Q", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "J", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "M", line[0..1]) == true) {
+            //try SpiceEngine.comments.append(line[1..]);
+
+        } else if (std.mem.eql(u8, "X", line[0..1]) == true) {
+           // try SpiceEngine.comments.append(line[1..]);
+
         } else {
-            card = Card{ .card_t = .TITLE, .args = line};
+            SpiceEngine.title = line;
+            printf("Netlist Title: {s}\n", .{SpiceEngine.title});
         }
 
+    }
+
+    prints("Netlist Comments:");
+    for (SpiceEngine.comments.items) |c| {
+        
+        prints(c);
     }
 }
