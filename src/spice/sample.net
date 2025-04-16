@@ -8,8 +8,9 @@ D1 1 2 DMOD
 VCC 1 0 12
 *VCC ordered from DigiKey
 
-RDiode 2 0 1k 25
-*R1 optional
+R1 2 0 1k TC=25
+R2 2 3 10k TC=25,35
+R3 3 0 1k
 
 *Controls:
 .OPTIONS LIST NODE LIMPTS=6401

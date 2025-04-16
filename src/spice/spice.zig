@@ -146,7 +146,7 @@ pub const Component = struct {
     nodes: [][]const u8,
     value: ?f64,
     model: ?Model,
-    args: std.StringArrayHashMapUnmanaged([]const u8),
+    args: std.StringHashMap([]const u8),
 
     pub const Component_t = enum(u8) {
         RESISTOR,
@@ -171,6 +171,11 @@ pub const Component = struct {
         SUBCKT,
 
     };
+
+    pub fn deinit(self: *@This()) void {
+        self.args.deinit();
+
+    }
 
 };
 
@@ -216,6 +221,9 @@ pub const Spice = struct {
 
     pub fn deinit(self: *Self) void {
         self.comments.deinit();
+        for (self.components.items) |*comp| {
+            comp.deinit();
+        }
         self.components.deinit();
         self.controls.deinit();
     }
@@ -230,6 +238,7 @@ pub const Spice = struct {
         var new_component: Component = undefined;
         switch (ct) {
             .RESISTOR => {
+                
                 const designator = words.next();
                 const net1 = words.next();
                 const net2 = words.next();
@@ -275,34 +284,34 @@ pub const Spice = struct {
         var val = try std.fmt.parseFloat(ctx, num);
 
         if(std.mem.eql(u8, "k", mod)) {
-            val = val * k;
+            val *= k;
         }
         if(std.mem.eql(u8, "M", mod)) {
-            val = val * M;
+            val *= M;
         }
         if(std.mem.eql(u8, "G", mod)) {
-            val = val * G;
+            val *= G;
         }
         if(std.mem.eql(u8, "T", mod)) {
-            val = val * T;
+            val *= T;
         }
         if(std.mem.eql(u8, "P", mod)) {
-            val = val * P;
+            val *= P;
         }
         if(std.mem.eql(u8, "m", mod)) {
-            val = val * m;
+            val *= m;
         }
         if(std.mem.eql(u8, "u", mod)) {
-            val = val * u;
+            val *= u;
         }
         if(std.mem.eql(u8, "n", mod)) {
-            val = val * n;
+            val *= n;
         }
         if(std.mem.eql(u8, "p", mod)) {
-            val = val * p;
+            val *= p;
         }
         if(std.mem.eql(u8, "f", mod)) {
-            val = val * f;
+            val *= f;
         }
 
         return val;
